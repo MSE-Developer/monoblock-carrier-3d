@@ -1,0 +1,204 @@
+<div id="mse-3d-viewer"></div>
+
+<script type="importmap">
+{
+"imports":{
+"three":"https://unpkg.com/three@0.180.0/build/three.module.js",
+"three/addons/":"https://unpkg.com/three@0.180.0/examples/jsm/"
+}
+}
+</script>
+
+<style>
+    #mse-3d-viewer {
+        width: 100%;
+        height: 100%;
+        min-height: 500px;
+        position: relative;
+        overflow: hidden;
+        background: #202020;
+        touch-action: none
+    }
+
+    #mse-3d-viewer canvas {
+        display: block;
+        width: 100% !important;
+        height: 100% !important;
+        outline: 0;
+        cursor: grab
+    }
+
+    #mse-3d-viewer canvas:active {
+        cursor: grabbing
+    }
+</style>
+
+<script type="module">
+    import *as THREE from "three";
+    import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+    import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+
+    (() => {
+
+        const viewer = document.getElementById("mse-3d-viewer");
+        const MODEL_URL = "https://cdn.jsdelivr.net/gh/MSE-Developer/monoblock-carrier-3d/monoblock.glb";
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x202020);
+
+        const camera = new THREE.PerspectiveCamera(40, 1, .01, 10000);
+
+        const renderer = new THREE.WebGLRenderer({
+            antialias: true,
+            powerPreference: "high-performance"
+        });
+
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
+        renderer.setSize(viewer.clientWidth, viewer.clientHeight, false);
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.toneMapping = THREE.NoToneMapping;
+        renderer.setClearColor(0x202020, 1);
+        renderer.sortObjects = false;
+
+        viewer.appendChild(renderer.domElement);
+
+        const hemi = new THREE.HemisphereLight(0xffffff, 0x303030, 2.2);
+        scene.add(hemi);
+
+        const key = new THREE.DirectionalLight(0xffffff, 2.2);
+        key.position.set(5, 8, 6);
+        scene.add(key);
+
+        const fill = new THREE.DirectionalLight(0xffffff, 1.1);
+        fill.position.set(-5, 3, 4);
+        scene.add(fill);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = .07;
+        controls.enablePan = false;
+        controls.enableZoom = true;
+        controls.zoomSpeed = .75;
+        controls.rotateSpeed = .7;
+        controls.minPolarAngle = .12;
+        controls.maxPolarAngle = Math.PI - .12;
+        controls.screenSpacePanning = false;
+
+        const loader = new GLTFLoader();
+
+        let modelSize = 1;
+        let rendering = false;
+        let lastFrame = 0;
+
+        loader.load(
+            MODEL_URL,
+            gltf => {
+
+                const model = gltf.scene;
+                scene.add(model);
+
+                const box = new THREE.Box3().setFromObject(model);
+                const center = box.getCenter(new THREE.Vector3());
+                const size = box.getSize(new THREE.Vector3());
+
+                modelSize = Math.max(size.x, size.y, size.z);
+
+                if (!isFinite(modelSize) || modelSize <= 0) return;
+
+                model.position.sub(center);
+
+                const distance = modelSize / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)) * 1.25;
+
+                camera.position.set(distance, distance * .55, distance);
+                camera.near = Math.max(modelSize * .001, .01);
+                camera.far = modelSize * 20;
+                camera.updateProjectionMatrix();
+
+                controls.target.set(0, 0, 0);
+                controls.minDistance = modelSize * .55;
+                controls.maxDistance = modelSize * 6;
+                controls.update();
+
+                model.traverse(o => {
+                    if (o.isMesh) {
+                        o.frustumCulled = true;
+                        o.castShadow = false;
+                        o.receiveShadow = false;
+                    }
+                });
+
+                render();
+            },
+
+            undefined,
+            error => console.error("GLB ERROR:", error)
+        );
+
+        function render() {
+            renderer.render(scene, camera);
+        }
+
+        function startRender() {
+            if (rendering) return;
+            rendering = true;
+            lastFrame = 0;
+            requestAnimationFrame(loop);
+        }
+
+        function stopRender() {
+            rendering = false;
+            render();
+        }
+
+        function loop(time) {
+            if (!rendering) return;
+
+            if (time - lastFrame >= 33) {
+                lastFrame = time;
+                controls.update();
+                render();
+            }
+
+            if (controls.enableDamping) {
+                requestAnimationFrame(loop);
+            } else {
+                stopRender();
+            }
+        }
+
+        controls.addEventListener("start", startRender);
+
+        controls.addEventListener("change", () => {
+            render();
+        });
+
+        controls.addEventListener("end", () => {
+            setTimeout(() => {
+                if (Math.abs(controls.getAzimuthalAngle()) >= 0) stopRender();
+            }, 120);
+        });
+
+        function resize() {
+
+            const w = viewer.clientWidth;
+            const h = viewer.clientHeight;
+
+            if (!w || !h) return;
+
+            camera.aspect = w / h;
+            camera.updateProjectionMatrix();
+            renderer.setSize(w, h, false);
+            render();
+
+        }
+
+        if (window.ResizeObserver) {
+            new ResizeObserver(resize).observe(viewer);
+        } else {
+            window.addEventListener("resize", resize);
+        }
+
+        resize();
+
+    })();
+</script>
